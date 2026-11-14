@@ -212,20 +212,36 @@ class Nano:
         if mido is None:
             raise RuntimeError("install mido and python-rtmidi first")
         self.verbose = verbose
-        self.inp = mido.open_input(port or self._find_port())
-        self.out = mido.open_output(port or self._find_port())
+        self.inp = mido.open_input(self._find_port(port, "input"))
+        self.out = mido.open_output(self._find_port(port, "output"))
         self.sequence = 0
         self._last_status = 0
 
     @staticmethod
-    def _find_port() -> str:
-        names = mido.get_output_names()
+    def _find_port(port: str | None, kind: str) -> str:
+        """Resolve one port name for one direction.
+
+        rtmidi numbers input and output ports independently, and a device often
+        lands on different indices on each side (for example "Nanocore 0" for
+        input and "Nanocore 1" for output), so the two directions have to be
+        looked up separately. Opening both with the same name fails on Windows.
+        An explicit --port value is matched exactly first, then as a substring.
+        """
+        names = mido.get_input_names() if kind == "input" else mido.get_output_names()
+        if port:
+            if port in names:
+                return port
+            lowered = port.lower()
+            for name in names:
+                if lowered in name.lower():
+                    return name
+            raise RuntimeError(f"no {kind} port matching {port!r}; available: {names}")
         for name in names:
             if "nanocore" in name.lower():
                 return name
         if len(names) == 1:
             return names[0]
-        raise RuntimeError(f"could not choose a Nanocore MIDI port from {names}")
+        raise RuntimeError(f"could not choose a Nanocore {kind} port from {names}")
 
     def _log(self, text: str) -> None:
         if self.verbose:

@@ -101,7 +101,10 @@ of 12,288 bytes each**, 466,944 bytes total. `map` that onto what you know:
 
 - a `NA2L` NAM blob is 7,516 bytes, comfortably inside a 12,288-byte slot;
 - only slots 0–29 are AMP slots — `0x31` refuses beyond 29 — so eight slots of the
-  same size belong to a different asset class.
+  same size belong to a different asset class. Measured here: slots 30–37 hold
+  **DDPB** drive-pedal models at 12,242 bytes each, and report `DDPB` in their
+  slot-info record while the NAM slots report `NA2L`. That is the distinction
+  `asset_type` exists to make.
 
 The AMP slot count and the storage slot count are not the same number. Code that
 loops `for slot in range(storage.slot_count)` and writes will walk off the end of
