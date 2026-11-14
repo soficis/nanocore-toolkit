@@ -1,0 +1,25 @@
+# Build artefacts
+__pycache__/
+*.py[cod]
+build-*/
+build_out/
+
+# Firmware images are never committed. Read your own; build your own.
+*.fmu
+*.bin
+nanocore-*.json.receipt
+*.receipt.json
+
+# Node
+node_modules/
+package-lock.json
+
+# A re-nanocore checkout, if you vendor it alongside the scripts
+re-nanocore/
+
+# Editor / OS junk
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+desktop.ini
