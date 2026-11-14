@@ -107,8 +107,9 @@ wrong for every slot except slot 1.
 
 ## What an IR slot holds
 
-Raw little-endian **float32 mono** samples at 48 kHz. No header, no metadata, no
-sample-rate field — the pedal assumes 48 kHz and does not resample or normalise on
+Raw little-endian **float32 mono** samples. No header, no metadata, no
+sample-rate field - the engine consumes the taps at whatever rate it runs and does not
+resample or normalise on
 write, and it does not require normalised input either. The limit is 4096 bytes =
 **1024 samples = 21.33 ms**.
 
@@ -117,6 +118,27 @@ the 30 slots are exactly 4096 bytes, slot 11 is 2780 bytes (695 samples) and slo
 is 3764 bytes (941 samples), and all 30 read back with a matching CRC-32. Any
 multiple of 4 up to the limit is accepted. Those factory payloads peak between 0.72
 and 1.06, which is the evidence that the pedal does not normalise your data.
+
+### Which rate? It depends on the firmware
+
+There is no rate field in a CAB slot, so the taps are applied at whatever rate the audio
+engine runs - and that changed between firmware lines. This matters because an IR built for
+one rate and played at the other is stretched by the ratio between them: 48000/44100 moves
+the whole response about **1.46 semitones down**, which is audible as a darker cab.
+
+- **1.10, 1.11, 1.12 - engine at 44.1 kHz.** `re-nanocore`'s decompiled 1.12
+  `firmware/versions/1.12/audio/engine.c:1234` writes `_DAT_ram_3004f690 = 0xac44`;
+  `docs/dsp-architecture.txt:59` states the audio initialisation configures 44100 Hz; the
+  USB descriptors advertise 44.1 kHz; and the block budget (64 frames) is
+  `64/44100 = 1.451 ms`, matching measured effect run times.
+- **1.2 - engine at 48 kHz.** The USB audio endpoint accepts **48000 only** (WASAPI and
+  WDM-KS both reject 44100 with `Invalid sample rate -9997`), both model formats carry a
+  48 kHz rate field (`NA2L` header offset 8; `DDPB` begins `DDPB`, version 3, then
+  `80 bb 00 00`), and the integer `0xac44` that 1.12's engine writes appears **nowhere** in
+  the 1.2 image, which holds 48000 as both an integer and a float instead.
+- Caveat, stated plainly: the 1.2 figure is inference from those indicators, not a
+  disassembly of its audio initialisation. It is the best-supported reading available, and
+  the failure mode if wrong is the 1.46-semitone shift above, not corruption.
 
 Turning a WAV into those bytes is a separate problem, and one where the vendor's
 algorithm is unknown; [`../ir/`](../ir/) has a converter that states its choices and

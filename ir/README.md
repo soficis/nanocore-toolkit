@@ -18,7 +18,7 @@ Measured on firmware 1.2:
 | bytes per slot | 4096 (enforced by the pedal: `0x51` declaring more is refused with status 3) |
 | format | raw little-endian **float32 mono**, no header |
 | samples | up to 1024, i.e. 21.33 ms at 48 kHz |
-| sample rate | 48 kHz assumed; not stored, not resampled |
+| sample rate | not stored. 48 kHz on firmware 1.2, where the engine runs at 48 kHz; 1.10-1.12 run at 44.1 kHz - see the rate section in `docs/sysex.md` |
 | normalisation | none applied by the pedal, and none required |
 | checksum | zlib CRC-32 over the whole slot, sent at `0x53`, reported by `0x56` |
 | name | 15 printable ASCII characters via `0x55` |
@@ -57,7 +57,9 @@ not in the pedal's native library either. What `wav_to_ir.py` does, and why:
 
 1. **Decode** PCM 8/16/24/32-bit or 32-bit float, then average channels to mono.
    The pedal is mono, so a stereo cab IR has to be summed somewhere.
-2. **Require 48 kHz** rather than resample. Silently resampling an IR changes it; a
+2. **Require 48 kHz** rather than resample. Silently resampling an IR changes it, and 48 kHz
+   is what firmware 1.2's engine runs at; on 1.10-1.12 the engine is 44.1 kHz, so convert
+   there with a deliberate resample or accept the file sitting ~1.46 semitones dark. A
    clear error tells you to convert it yourself, with a tool you trust.
 3. **Drop the lead-in**: skip samples before the first one reaching 1 % of the file's
    peak, so a silent preamble does not consume the window.
