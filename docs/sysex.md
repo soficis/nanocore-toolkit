@@ -122,9 +122,10 @@ pedal:
 
 Bytes 0–3 are the part of the first eight that decodes cleanly: `38 × 12,288 =
 466,944` and `30 × 4,096 = 122,880`. Bytes 4–7 are `4096` on both paths, so they
-are not the asset limit for either. 12,288 is exactly three 4 KiB sectors and
-4,096 is one, which makes a flash-granularity constant the obvious guess, but that
-is a guess and nothing here tests it. `nanocore-controller` lists the whole of
+are not the AMP limit; on the IR path they coincide with the limit, so IR cannot
+tell you which field is which. 12,288 is exactly three 4 KiB sectors and 4,096 is
+one, which makes a flash-granularity constant the obvious guess, but that is a
+guess and nothing here tests it. `nanocore-controller` lists the whole of
 bytes 0–7 as unknown and asks for exactly this measurement
 (`docs/amp-ir-protocol.md:89,143,153`); bytes 0–3 are now known, 4–7 are not.
 
