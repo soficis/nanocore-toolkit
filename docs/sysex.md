@@ -100,6 +100,28 @@ The IR record stops at byte 29: no asset-type byte, because a CAB slot only ever
 holds one kind of thing. A reader that insists on the tail would reject every IR
 reply, so treat byte 30 as optional and branch on the command, not on the length.
 
+One trap in that byte 2: it is a **per-slot flag** (`1` = this slot is the selected
+one), not the slot index. The selected *index* is the `u16` at offset 16 of `0x50`.
+Reading byte 2 as an index gives you `1` for whatever slot is selected, which is
+wrong for every slot except slot 1.
+
+## What an IR slot holds
+
+Raw little-endian **float32 mono** samples at 48 kHz. No header, no metadata, no
+sample-rate field — the pedal assumes 48 kHz and does not resample or normalise on
+write, and it does not require normalised input either. The limit is 4096 bytes =
+**1024 samples = 21.33 ms**.
+
+A slot does not have to be full. Read from the factory bank of a 1.2 pedal: 28 of
+the 30 slots are exactly 4096 bytes, slot 11 is 2780 bytes (695 samples) and slot 15
+is 3764 bytes (941 samples), and all 30 read back with a matching CRC-32. Any
+multiple of 4 up to the limit is accepted. Those factory payloads peak between 0.72
+and 1.06, which is the evidence that the pedal does not normalise your data.
+
+Turning a WAV into those bytes is a separate problem, and one where the vendor's
+algorithm is unknown; [`../ir/`](../ir/) has a converter that states its choices and
+an installer that verifies every write byte-for-byte.
+
 **Open question, stated rather than glossed.** `re-nanocore`'s reconstruction of
 the firmware 1.10 handler sets the reply length to `0x1e` — 30
 (`firmware/protocol/amp_commands.c:503-506`), with an in-RAM stride of `0x20`.

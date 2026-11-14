@@ -15,6 +15,7 @@ here was measured on hardware, not guessed from disassembly alone.
 | `cli/` | `nanocore_cli.py` — convert `.nam` → pedal blob, upload / verify over USB MIDI, and validate custom-FX patch descriptors |
 | `webusb/` | Two browser pages: read your OS partition over raw DFU (**read-only**), and flash a patched image with a byte-exact preflight |
 | `fx12/` | The firmware 1.2 UniVibe patch — effect source, linker scripts, builder, audit tools, example descriptor |
+| `ir/` | CAB-slot tooling: WAV → slot payloads, backup, install, verify |
 | `docs/` | The formats: `NA2L.md`, `sysex.md`, `firmware-12.md` |
 
 ---
@@ -30,6 +31,7 @@ The pedal already has good public documentation. This repo exists for the parts 
 | **Slot-info is 31 bytes, not 30** | All public parsers assume 30. `nanocore-controller` hard-rejects any other length; `livtra-nanocore-editor` silently drops the extra byte. It carries an `asset_type` field (`1` = DDPB, `3` = NA2L) that public code never sees. |
 | **Firmware 1.2 patch sites and build** | Not documented. Public custom-FX work targets 1.10–1.12; every "1.2" hit in those repos is ToneCommand's version number or a WCAG rule. 1.2 is an *earlier* build, not shorthand for 1.12. |
 | **A raw-DFU custom effect deployed on 1.2** | Public hardware runs are all on 1.10. This is the first write of this class on 1.2, and it changes the DSP body, the parameter defaults writer, the MOD value formatter, the effect name and two label tables. |
+| **What a CAB/IR slot holds, and how to fill one** | The IR opcodes are documented; the payload and the conversion are not. Measured here: raw float32 mono, 1024 samples / 21.33 ms, no header, no normalisation, short slots legal (factory has 695- and 941-sample slots), and the pedal enforces its own 4096-byte limit at `0x51`. `nanocore-controller` has an IR importer that states the vendor's WAV conversion is unknown; [`ir/`](ir/) is a working converter and a byte-verified installer. |
 
 If you only read one file, read [`docs/NA2L.md`](docs/NA2L.md) — that is the format the pedal
 actually stores, and it is the reason none of the existing converters produce something the
@@ -132,6 +134,7 @@ the hash fields and the derivation behind each site.
 | Piece | Needs |
 |---|---|
 | `cli/` | Python 3.9+, `mido`, `python-rtmidi` |
+| `ir/` | Same as `cli/` — Python 3.9+, `mido`, `python-rtmidi` |
 | `webusb/` | Desktop Chrome or Edge (WebUSB is not in Safari or Firefox), Node for the test harness |
 | `fx12/` | Xuantie-900 `riscv64-unknown-elf` GCC 10.2.0 / binutils 2.35, `riscv64-unknown-elf-objcopy` |
 
