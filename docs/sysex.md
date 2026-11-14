@@ -55,16 +55,26 @@ use is 64 bytes (7,516 bytes = 118 chunks), and reads are windowed at 200 bytes.
 
 ---
 
-## Correction 1: the slot-info record is 31 bytes on firmware 1.2
+## Correction 1: AMP slot-info is 31 bytes, IR slot-info is 30
 
-Every public parser assumes 30. `livtra-nanocore-editor` requires
-`payload.length >= 30` and loops the name to `i < 30`, so a 31st byte is silently
-dropped (`packages/protocol/src/midi/sysex.ts:796-802`). `nanocore-controller`
-is stricter and **hard-rejects anything that is not exactly 30 bytes**
-(`src/nanocore_controller/nanocore_protocol.py:350-352`).
+Every public parser assumes a single length, 30. On firmware 1.2 that is right for
+one path and wrong for the other — and the two paths share the parser:
 
-On firmware 1.2 the reply carries a 31st byte, and it is the one that says what
-kind of asset the slot holds:
+| command | record | measured on 1.2 |
+|---|---:|---|
+| `0x36` AMP slot info | **31 bytes** | all 30 AMP slots |
+| `0x56` IR slot info | **30 bytes** | all 30 CAB slots |
+
+So `livtra-nanocore-editor` requiring `payload.length >= 30` and looping the name
+to `i < 30` is correct for IR and silently drops the 31st byte for AMP
+(`packages/protocol/src/midi/sysex.ts:796-802`). `nanocore-controller` is stricter
+and **hard-rejects anything that is not exactly 30 bytes**
+(`src/nanocore_controller/nanocore_protocol.py:350-352`): its CAB path works, its
+NAM path fails on this firmware. If you have wondered why one of those libraries
+reads factory IRs happily but chokes on NAM slots, this is why.
+
+The AMP reply on firmware 1.2 carries a 31st byte, and it is the one that says
+what kind of asset the slot holds:
 
 | byte | field |
 |---:|---|
@@ -86,6 +96,10 @@ Why it matters practically: without byte 30 you cannot tell a `DDPB` slot from a
 `NA2L` slot, so you can read a non-NAM asset and try to interpret it as a NAM
 model. `3` is the blob described in [`NA2L.md`](NA2L.md).
 
+The IR record stops at byte 29: no asset-type byte, because a CAB slot only ever
+holds one kind of thing. A reader that insists on the tail would reject every IR
+reply, so treat byte 30 as optional and branch on the command, not on the length.
+
 **Open question, stated rather than glossed.** `re-nanocore`'s reconstruction of
 the firmware 1.10 handler sets the reply length to `0x1e` — 30
 (`firmware/protocol/amp_commands.c:503-506`), with an in-RAM stride of `0x20`.
@@ -93,7 +107,31 @@ Either 1.2 emits one byte more than 1.10, or the 1.10 reconstruction stops one
 short. We only measured 1.2, where 30 would have truncated the record. Do not
 assume the tail exists on other firmware versions without checking.
 
-## Correction 2: `0x30`'s two numbers mean something specific
+## Correction 2: what the storage-info reply actually contains
+
+Both `0x30` and `0x50` answer exactly 20 bytes. Read straight off a firmware 1.2
+pedal:
+
+| bytes | AMP `0x30` | IR `0x50` | reading |
+|---|---:|---:|---|
+| 0–3 | `466944` | `122880` | slot count × per-slot limit, i.e. total capacity in bytes |
+| 4–7 | `4096` | `4096` | **unknown**, and not the per-slot limit |
+| 8–11 | `38` | `30` | slot count |
+| 12–15 | `12288` | `4096` | per-slot limit in bytes |
+| 16–17 | `18` | `9` | active slot, `u16` (`0xFFFF` = none) |
+
+Bytes 0–3 are the part of the first eight that decodes cleanly: `38 × 12,288 =
+466,944` and `30 × 4,096 = 122,880`. Bytes 4–7 are `4096` on both paths, so they
+are not the asset limit for either. 12,288 is exactly three 4 KiB sectors and
+4,096 is one, which makes a flash-granularity constant the obvious guess, but that
+is a guess and nothing here tests it. `nanocore-controller` lists the whole of
+bytes 0–7 as unknown and asks for exactly this measurement
+(`docs/amp-ir-protocol.md:89,143,153`); bytes 0–3 are now known, 4–7 are not.
+
+One operational note, measured while installing IRs: `active` was `4` before
+writing CAB slots 0–9 and `9` afterwards — it followed the last slot written. Treat
+it as mutable by your own writes, not as a stored setting you can rely on across
+sessions.
 
 The reply reports `38` and `12288`. Both are already in the public record — but
 their relationship is the useful part: `38 × 0x3000 = 0x72000`, i.e. **38 slots
