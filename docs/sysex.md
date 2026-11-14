@@ -149,6 +149,22 @@ The AMP slot count and the storage slot count are not the same number. Code that
 loops `for slot in range(storage.slot_count)` and writes will walk off the end of
 the AMP region.
 
+## What the pedal refuses on its own
+
+Worth knowing before you trust a client-side check: the vendor app is not the only
+thing enforcing limits.
+
+- **`0x51` begin validates the length.** Declaring 8,192 bytes (2,048 samples) for a
+  slot whose limit is 4,096 is refused with **status `3`** and an empty reply,
+  before a single chunk is sent. An oversize IR cannot be written through this
+  path even if your client skips the check the vendor app performs.
+- **`0x57` is not required for a write to land.** Writing a slot as
+  begin → chunks → commit → name and omitting `0x57` stores the bytes, the name and
+  the CRC-32 exactly as sent: readback identical, `0x56` reporting the expected
+  checksum, all other slots untouched. `0x57`'s purpose is still unknown, but "the
+  write does not take without it" is now excluded. Whether it forces the running
+  DSP to reload the slot is not something a byte comparison can answer.
+
 ## Suggested write sequence
 
 1. `0x30` — confirm slot count and per-slot capacity
