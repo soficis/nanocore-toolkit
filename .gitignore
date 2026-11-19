@@ -17,6 +17,11 @@ package-lock.json
 # A re-nanocore checkout, if you vendor it alongside the scripts
 re-nanocore/
 
+# Local agent files: never commit
+opencode.json
+.opencode/
+AGENTS.md
+
 # Editor / OS junk
 .vscode/
 .idea/
