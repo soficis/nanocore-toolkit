@@ -3,9 +3,11 @@
 The build and audit tooling behind the first custom effect deployed on **firmware 1.2** of the
 Livtra Nanocore.
 
-> **1.2 is not 1.12.** It is an *earlier* build. The public projects cover 1.10, 1.11 and 1.12;
-> 1.2 appears nowhere. Do not assume a 1.12 address works on 1.2 — see
-> [`../docs/firmware-12.md`](../docs/firmware-12.md) for how each site was derived.
+> **1.2 is not 1.12.** It is a *newer* branch, released on 11 Nov 2026; the version number sorts
+> below 1.10, but the build follows 1.12. `re-nanocore` added 1.2 targets on 16 Nov 2026, so this
+> is no longer the only 1.2 work. Do not assume a 1.12 address works on 1.2 — see
+> [`../docs/firmware-12.md`](../docs/firmware-12.md) for how each site was derived, and
+> [`../docs/firmware-12-images.md`](../docs/firmware-12-images.md) before flashing either image.
 
 **Nothing here is a firmware image.** No vendor code, no `.fmu`, no OS partition. The scripts
 read a stock readback *you* produce and build a patched image locally.
@@ -26,6 +28,8 @@ read a stock readback *you* produce and build a patched image locally.
   (`riscv64-unknown-elf-gcc` 10.2.0, binutils 2.35), expected under
   `~/nanocore_tools/xuantie/`, or point `--tool-prefix` at your own. The Docker route is not
   used here.
+- For `deploy_12.py`: `mido` and `python-rtmidi` to request update mode, and `libusb-package`
+  (or `--libusb`) for the raw-DFU write. `pip install mido python-rtmidi libusb-package`.
 
 ### Expected layout and overrides
 
@@ -54,6 +58,10 @@ Scripts resolve paths from the environment, so nothing is tied to one machine:
 | `diff_report_12.py` | Full before/after diff, collapsed into maximal ranges, and asserts nothing outside them changed. |
 | `verify_vs_shipped.py` | Compares a freshly built payload against the author's published hashes at a known site. |
 | `build_plan_12.py` | Converts the descriptor into re-nanocore's `raw-os-fit` plan for `raw_dfu.py`. |
+| `descriptor_12.py` | Shared schema-1/schema-2 load, classify and apply logic. |
+| `build_from_descriptor.py` | Builds any 1.2 image from its descriptor and a stock readback. |
+| `identify_image.py` | Says which descriptor, and which state, an OS readback is — offline. |
+| `deploy_12.py` | Raw DFU: `enter`, `backup`, descriptor-authenticated `deploy`, and `restore`. |
 | `examples/patch-1.2.json` | The finished descriptor — the exact patch that was flashed. |
 
 ---
@@ -75,6 +83,11 @@ differ and all 43 are page materialisation.
 
 If you add a `'1.2'` entry, do it by adding the address to `SITES`, then re-run
 `verify_vs_shipped.py` to confirm the blobs still reproduce.
+
+`--version 1.12` in that command only satisfies the default selector; `--address`
+overrides the address it picks. It is also copied into the receipt as
+`firmware_version`, so today's 1.2 build records `\"1.12\"` there. Adding the
+`'1.2'` entry fixes the receipt as well as the command line.
 
 `--force` is required if the output directory already exists.
 
@@ -183,20 +196,56 @@ likely to still be hiding somewhere.
 
 ## Safety
 
-- **`build_patch_12.py` produces an image; it does not write one.** Flashing is
-  `../webusb/flash.html`, which compares your live partition byte for byte before erasing
-  anything.
-- `program()` in the DFU layer **performs no descriptor validation**. `build_plan_12.py` exists
-  to feed re-nanocore's `raw_dfu.py`, whose deploy path is protocol-tested but was not
-  hardware-exercised by its author. This project flashed with the WebUSB page instead.
-- Keep the stock readback. It is the only rollback.
+- **The builders produce an image; they do not write one.** The 13 Nov UniVibe build was
+  flashed with `../webusb/flash.html`; the 18 Nov combined image went over raw DFU with
+  `deploy_12.py`.
+- `program()` in the DFU layer **performs no descriptor validation**. `deploy_12.py` therefore
+  classifies the image against its descriptor before opening USB, requires the live partition
+  hash to match `--expected-current`, and verifies the readback before manifesting.
+  `webusb/flash.js` does the same job with four pinned hashes.
+- Keep the stock readback. It is the only rollback — or `deploy_12.py restore` with a saved
+  partition.
+
+## Other 1.2 descriptors
+
+`build_from_descriptor.py`, `identify_image.py` and `deploy_12.py` accept schema 1 and 2, so
+re-nanocore's UniVibe and its combined Octaver build without editing addresses. Identify a
+readback first:
+
+```
+python identify_image.py --image <readback> \
+    --descriptor examples/patch-1.2.json --descriptor ../path/to/web/octave-1.2.json
+```
+
+It prints `stock` or `installed`, the effect and the installed FIT hash, and exits 0 for one
+identity, 1 for none, 2 for more than one installed identity. Then build and deploy:
+
+```
+python build_from_descriptor.py --descriptor octave-1.2.json \
+    --stock <stock-readback> --out octave-os.bin
+python deploy_12.py enter
+python deploy_12.py backup --out backup --libusb <dll>
+python deploy_12.py deploy --descriptor octave-1.2.json --image octave-os.bin \
+    --expected-current <sha256> --out deploy --libusb <dll>
+python deploy_12.py restore --image backup/os-partition.bin \
+    --expected-current <sha256> --out restore --libusb <dll> --confirm "RESTORE <sha8>"
+```
+
+`build_from_descriptor.py` refuses unless the input classifies as `stock` and the output as
+`installed` for that descriptor. `deploy` refuses unless the image classifies as `installed`
+and the live partition matches `--expected-current`; `restore` writes a saved partition back
+and requires the confirmation phrase. The three published images and their hashes are in
+[`../docs/firmware-12.md#working-with-any-12-descriptor`](../docs/firmware-12.md#working-with-any-12-descriptor).
+
+Do not mix schemas: a schema-1 image will not classify under a schema-2 descriptor, and vice
+versa. Classification, not the file name, is what the tools trust.
 
 ## Known regression
 
 **SPEED displays 0–100% instead of the stock exponential/Hz figure.** The index-0 formatter arm
-was dropped to fit the 68-byte region. The stored parameter value and the DSP output are
-unchanged — only the rendered number differs. This is accepted, not pending.
+was dropped to fit the 68-byte region. The stored parameter value is unchanged, and no DSP code
+was touched on this path — only the rendered number differs. This is accepted, not pending.
 
 Unmeasured: whether the defaults carried over from the 1.12 build (0.35 / 0.8 / 0.5) suit 1.2
-subjectively, and whether the MODE encoder's detents are genuinely two-state. The display flip is
-proven; the feel is your ear's call.
+subjectively, and whether the MODE encoder's detents are genuinely two-state. The display flip
+was observed on the pedal; the feel is your ear's call.

@@ -1,12 +1,15 @@
 # Custom effects on firmware 1.2
 
-The pedal's firmware line runs **1.2, 1.10, 1.11, 1.12** — note that `1.2` is an
-early build, not an abbreviation of `1.12`. Existing public work targets `1.10`,
-`1.11` and `1.12`; at the time of writing, firmware `1.2` appears nowhere in any
-of the three community repositories.
+The pedal's firmware line runs **1.2, 1.10, 1.11, 1.12** — `1.2` is a newer
+branch, not an abbreviation of `1.12`. It was released on 11 Nov 2026; the
+version number sorts below `1.10`, but the build follows `1.12`. `re-nanocore`
+added 1.2 targets on 16 Nov 2026, so this is no longer the only 1.2 work.
 
-This directory is the missing case: the addresses, the patch descriptor, and a
-build that was flashed to real hardware on 13 Nov 2026 and boots.
+This directory documents the first public 1.2 custom effect: the addresses, the
+patch descriptor, and a build flashed to real hardware on 13 Nov 2026 that
+boots. It has not been played through a guitar and amp yet, so nothing here is
+a claim about how it sounds. Two different 1.2 UniVibe images now exist — see
+[`firmware-12-images.md`](firmware-12-images.md) before flashing either.
 
 One consequence worth knowing before you write a validator: the 1.2 OS image's own
 FIT header still reports `image_version` **`1.12`**. Firmware 1.2 is a distinct
@@ -59,8 +62,10 @@ image rather than editing seg3's pair in place, so the header is a product of th
 image, not a patch on top of it.
 
 **The bootloader does enforce these.** Recomputing seg3's crc32 and md5 was the
-one genuinely unknown step: every prior hardware deployment was on 1.10, and this
-pair had never been through a 1.2 bootloader. It was accepted.
+one genuinely unknown step: at the time, every public hardware deployment had been
+on 1.10, and this pair had never been through a 1.2 bootloader. It was accepted,
+and `re-nanocore`'s 1.2 images, which set `hardwareTested: true`, recompute the
+same fields.
 
 ## What actually differs
 
@@ -177,13 +182,82 @@ percentage renderer and the `CHORUS`/`VIBRATO` strings. The parameter value sent
 the DSP is unchanged — this is a display-only change. If you rebuild with a larger
 slot available, you can restore it.
 
+## Working with any 1.2 descriptor
+
+`re-nanocore`'s Octaver is a different format: `schemaVersion` 2, 81 patches, a 55-byte
+trampoline at the Velvet site and 37,952 bytes appended after the stock FIT. It replaces the
+stock Octaver/PITCH slot as well as Velvet Vibrato, so it is not the six-site patch above.
+Its normalized hash covers only the timestamp, not every patched range.
+
+Four tools handle both schemas, so the other UniVibe is not a special case:
+
+| tool | does |
+|---|---|
+| `fx12/build_from_descriptor.py` | descriptor + stock readback → image; refuses unless the input classifies as stock and the output as installed |
+| `fx12/identify_image.py` | reports which descriptor and which state an OS readback is, offline |
+| `fx12/deploy_12.py enter` | normal mode → Lupgrader over MIDI SysEx |
+| `fx12/deploy_12.py backup` / `deploy` / `restore` | raw DFU read, authenticated write, saved-partition write-back |
+
+Build and identify first; they touch no USB:
+
+```
+python fx12/build_from_descriptor.py --descriptor octave-1.2.json \
+    --stock <readback> --out octave-os.bin
+python fx12/identify_image.py --image octave-os.bin \
+    --descriptor fx12/examples/patch-1.2.json --descriptor octave-1.2.json
+```
+
+The second command should report `installed UNIVIBE_OCTAVE`, not `stock`.
+
+Flashing, with the pedal in normal mode, ToneCommand closed and audio cables out:
+
+```
+python fx12/deploy_12.py enter
+python fx12/deploy_12.py backup --out backup --libusb <dll>       # prints the live sha256
+python fx12/deploy_12.py deploy --descriptor octave-1.2.json \
+    --image octave-os.bin --expected-current <sha256> --out deploy --libusb <dll>
+```
+
+`deploy` classifies the image against the descriptor before opening USB, re-reads the
+partition, refuses unless the live hash matches, writes only changed 64 KiB sectors and
+requires a byte-exact readback before manifesting. `restore` writes a saved partition back
+and requires `--confirm "RESTORE <first 8 hex>"`; that is the path back to stock, or to the
+image you were running before.
+
+Flashed here on 18 Nov 2026. The preflight readback was the 13 Nov UniVibe image
+(`b374b5e3…a681e222`); the post-write readback matched the target exactly
+(`7c2656e9…72284511`); the pedal re-enumerated as `33c3:1301` afterwards. The documented
+`deploy_12.py` command was then run again against that same live partition: it classified the
+image, read the partition, erased **zero** sectors, and matched the readback exactly
+(`manifestation_status` `000000000800`). It has **not** been played, and the descriptor still
+sets `workInProgress: true`.
+
+### Test vector
+
+From the stock readback `8ed563f1…13a684da`, all three published 1.2 UniVibe images rebuild
+byte for byte:
+
+| descriptor | full image sha256 | installed FIT sha256 | changed 4 KiB blocks |
+|---|---|---|---|
+| this repo, v1 | `b374b5e3…a681e222` | `af3b3d5c…875d309` | 5 |
+| re-nanocore v1 | `2be1b263…a580059c` | `fac0d102…ebce920` | 7 |
+| re-nanocore v2 | `7c2656e9…72284511` | `42411bad…f0cd9e54` | 26 |
+
+The full-image hashes are timestamp-dependent: a build preserves the timestamp in the
+readback it was given. Compare the installed FIT hash, or run `identify_image.py`; do not
+compare a full-image hash from a different readback.
+
 ## Also worth knowing
 
 - `program()` performs **no descriptor validation at all**. Any authentication of
   the image has to happen in the caller. `webusb/flash.js` therefore hard-codes
   the whole-partition sha256, the FIT-prefix sha256 and the stock sha256, and
   re-checks them on the buffers immediately before the first USB call.
-- `re-nanocore`'s raw-DFU backend is, in its author's words, protocol-tested but
-  not hardware-exercised. This deployment was its first physical write. It worked.
-- Firmware `1.2` custom effects are **new**. If you are on 1.10–1.12, use
-  `re-nanocore`'s own patch manifests instead — they are better tested.
+- `re-nanocore`'s raw-DFU backend was, in its author's words, protocol-tested but
+  not hardware-exercised when this build used it. This deployment was its first
+  physical write. It booted, and `re-nanocore` has since published 1.2 images
+  that set `hardwareTested: true`.
+- If you are on 1.10–1.12, use `re-nanocore`'s own patch manifests; they are older
+  and better tested. On 1.2 there are now two independent UniVibe images — see
+  [`firmware-12-images.md`](firmware-12-images.md) before choosing one. Neither
+  has been auditioned.

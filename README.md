@@ -3,10 +3,47 @@
 Tools and reverse-engineered formats for the **Livtra Nanocore** guitar multi-effects pedal.
 
 Produced while replacing all 30 AMP slots with NAM A2 Lite captures, and while porting a
-custom MOD effect (UniVibe) to **firmware 1.2** — a build no public project covers. Everything
-here was measured on hardware, not guessed from disassembly alone.
+custom MOD effect (UniVibe) to **firmware 1.2** — the branch released on 11 Nov 2026. This
+repo published the first public 1.2 custom effect; `re-nanocore` followed with its own 1.2
+images on 16 Nov 2026.
+
+Work here is agent-assisted reverse engineering: most of what follows is read out of a decoded
+image, not heard. The evidence level is named wherever it matters, and the three levels are
+defined below.
+
+> **Do not flash a 1.2 image just because it says "UniVibe".** There are two, and they are not
+> interchangeable. This repo's replaces Velvet Vibrato in place at six sites (installed FIT
+> sha256 `af3b3d5c…875d309`); `re-nanocore`'s patches eight sites, including two `jal`
+> redirects, and hashes to `fac0d102…ebce920`. The FIT header still reports `1.12` even on the
+> 1.2 release, so identify an image by `firmwareVersion` **and** `stockFitSha256`, never by
+> `imageVersion` alone; `fx12/identify_image.py` does that classification offline. Read
+> [`docs/firmware-12-images.md`](docs/firmware-12-images.md) before flashing either.
+>
+> Status: this repo's UniVibe image was flashed on 13 Nov 2026 and booted, and the pedal here
+> has run the combined UniVibe + Octaver image since 18 Nov 2026. Neither has been played
+> through a guitar and amp.
 
 ---
+
+## What has been checked, and what has not
+
+Three levels, used throughout this repo. A claim that does not say otherwise is at the first.
+
+| level | means | in this repo |
+|---|---|---|
+| **read** | decoded from a firmware image or captured SysEx. Says what the code does, not what the hardware does. | almost all of `docs/` |
+| **flashed** | written to a pedal, which booted and still responds | the 1.2 UniVibe image, 13 Nov 2026 |
+| **played** | guitar into amp, recorded, level-matched, timing measured under load | **nothing** |
+
+No claim here reaches **played**. The 30 NAM captures in the AMP slots were uploaded and read
+back byte for byte; none has been auditioned, so their sound is unverified against the models
+they came from. `re-nanocore` sets `hardwareTested: true` in its 1.2 descriptors, and its own
+notes list physical 48 kHz timing and behaviour with a real uploaded model as not established.
+Read that flag as "flashed and boots" in both projects until an audition or a load measurement
+is published.
+
+The gap is real, not a hedge: the firmware is readable and the bootloader accepts the images,
+but no project documents putting a guitar through either effect.
 
 ## What's here
 
@@ -16,7 +53,7 @@ here was measured on hardware, not guessed from disassembly alone.
 | `webusb/` | Two browser pages: read your OS partition over raw DFU (**read-only**), and flash a patched image with a byte-exact preflight |
 | `fx12/` | The firmware 1.2 UniVibe patch — effect source, linker scripts, builder, audit tools, example descriptor |
 | `ir/` | CAB-slot tooling: WAV → slot payloads, backup, install, verify |
-| `docs/` | The formats: `NA2L.md`, `sysex.md`, `firmware-12.md` |
+| `docs/` | The formats: `NA2L.md`, `sysex.md`, `firmware-12.md`, `firmware-12-images.md` |
 
 ---
 
@@ -26,12 +63,12 @@ The pedal already has good public documentation. This repo exists for the parts 
 
 | Finding | Status elsewhere |
 |---|---|
-| **`NA2L` blob format** — 32-byte header, 1,871 float32 weights, 7,516 bytes total | Not documented. The only public mentions are a one-line aside in `nanocore-controller` and a resource listing in `re-nanocore`. No magic, header, struct, weight count or checksum anywhere. Public tooling routes through `.ead`/`SAPF` or `.nam` JSON instead. |
-| **The pedal only accepts a two-submodel A2 container** | Unknown. Zero hits for `submodel`, `Lite` or `max_value` across all three public repos. A single-submodel `.nam` is rejected by the pedal's parser. |
+| **`NA2L` blob format** — 32-byte header, 1,871 float32 weights, 7,516 bytes total | Not documented when this was written. The only public mentions were a one-line aside in `nanocore-controller` and a resource listing in `re-nanocore`; tooling routed through `.ead`/`SAPF` or `.nam` JSON. `re-nanocore`'s 1.2 NAM notes (16 Nov 2026) now describe the same header, weight count, CRC and validator independently — see [`docs/NA2L.md`](docs/NA2L.md), which records the layout measured here and the firmware-side confirmation. |
+| **The pedal only accepts a two-submodel A2 container** | Unknown. At the time of writing, the public repos had no `submodel` or `max_value` handling, and a single-submodel `.nam` was rejected by the pedal's parser. `re-nanocore`'s 1.2 work now states separately that the runtime is fixed A2-Lite and rejects other shapes, which agrees with this, but it still does not document the container rule. |
 | **Slot-info is 31 bytes, not 30** | All public parsers assume 30. `nanocore-controller` hard-rejects any other length; `livtra-nanocore-editor` silently drops the extra byte. It carries an `asset_type` field (`1` = DDPB, `3` = NA2L) that public code never sees. |
-| **Firmware 1.2 patch sites and build** | Not documented. Public custom-FX work targets 1.10–1.12; every "1.2" hit in those repos is ToneCommand's version number or a WCAG rule. 1.2 is an *earlier* build, not shorthand for 1.12. |
-| **A raw-DFU custom effect deployed on 1.2** | Public hardware runs are all on 1.10. This is the first write of this class on 1.2, and it changes the DSP body, the parameter defaults writer, the MOD value formatter, the effect name and two label tables. |
-| **What a CAB/IR slot holds, and how to fill one** | The IR opcodes are documented; the payload and the conversion are not. Measured here: raw float32 mono, 1024 samples / 21.33 ms, no header, no normalisation, short slots legal (factory has 695- and 941-sample slots), and the pedal enforces its own 4096-byte limit at `0x51`. `nanocore-controller` has an IR importer that states the vendor's WAV conversion is unknown; [`ir/`](ir/) is a working converter and a byte-verified installer. |
+| **Firmware 1.2 patch sites and build** | First published 13 Nov 2026, three days before `re-nanocore` added 1.2 targets. `1.2` is a newer branch, not shorthand for 1.12: it was released 11 Nov 2026, after 1.12. Two different 1.2 UniVibe images now exist — see [`docs/firmware-12-images.md`](docs/firmware-12-images.md). |
+| **A raw-DFU custom effect deployed on 1.2** | The first write of this class on 1.2 (13 Nov 2026); `re-nanocore`'s 1.2 images followed on 16 Nov. Prior public hardware runs were on 1.10. It changes the DSP body, the parameter defaults writer, the MOD value formatter, the effect name and two label tables. |
+| **What a CAB/IR slot holds, and how to fill one** | The IR opcodes are documented; the payload and the conversion are not. Measured here: raw float32 mono, 1,024 samples (21.33 ms at the 1.2 engine's 48 kHz), no header, no normalisation, short slots legal (factory has 695- and 941-sample slots), and the pedal enforces its own 4096-byte limit at `0x51`. `nanocore-controller` has an IR importer that states the vendor's WAV conversion is unknown; [`ir/`](ir/) is a working converter and a byte-verified installer. |
 
 If you only read one file, read [`docs/NA2L.md`](docs/NA2L.md) — that is the format the pedal
 actually stores, and it is the reason none of the existing converters produce something the
@@ -102,8 +139,9 @@ Quit ToneCommand first — it holds the MIDI port.
 The write path is deliberately paranoid, because it has to be:
 
 1. both `expectedCurrent` and `target` must be exactly 868,352 bytes;
-2. the page checks three hard-coded sha256 values and requires the descriptor to classify the
-   target as `installed` and your readback as `stock` — `program()` itself authenticates
+2. the page checks four hard-coded sha256 values — the stock readback, the patched image, the
+   patched FIT prefix and the descriptor file itself — and requires the descriptor to classify
+   the target as `installed` and your readback as `stock`; `program()` itself authenticates
    nothing about where the image came from;
 3. it reads all 212 blocks of the live partition and compares **byte for byte** against
    `expectedCurrent`, aborting on a single difference;
@@ -172,8 +210,9 @@ See [`NOTICE.md`](NOTICE.md).
 
 ## Credits
 
-Built on the work of three excellent public projects. All are MIT-licensed; GPLv3 is
-one-way compatible with MIT, and their notices are retained in `NOTICE.md`.
+Built on the work of three excellent public projects. All three are MIT-licensed, with a
+vendor carve-out in `re-nanocore`; GPLv3 is one-way compatible with MIT, and their notices are
+retained in `NOTICE.md`.
 
 - **[re-nanocore](https://github.com/jcuhnoio/re-nanocore)** (`jcuhnoio`) — the deepest public
   reverse-engineering of this pedal: firmware decoding, the FIT container, the FAL partition
@@ -196,8 +235,6 @@ container format, and the **Xuantie-900** RISC-V toolchain that compiles the eff
 ## License
 
 GNU General Public License v3.0 — see [`LICENSE`](LICENSE).
-
-Copyright (C) 2026 soficis.
 
 The GPL grant covers original work only. Vendor firmware, bootloaders, application binaries,
 model weights, impulse responses and UI assets are not distributed here and are not covered.

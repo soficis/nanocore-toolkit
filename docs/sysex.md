@@ -111,7 +111,7 @@ Raw little-endian **float32 mono** samples. No header, no metadata, no
 sample-rate field - the engine consumes the taps at whatever rate it runs and does not
 resample or normalise on
 write, and it does not require normalised input either. The limit is 4096 bytes =
-**1024 samples = 21.33 ms**.
+**1,024 samples**, which is 21.33 ms at the 1.2 engine's 48 kHz (23.22 ms at 44.1 kHz).
 
 A slot does not have to be full. Read from the factory bank of a 1.2 pedal: 28 of
 the 30 slots are exactly 4096 bytes, slot 11 is 2780 bytes (695 samples) and slot 15
@@ -131,14 +131,20 @@ the whole response about **1.46 semitones down**, which is audible as a darker c
   `docs/dsp-architecture.txt:59` states the audio initialisation configures 44100 Hz; the
   USB descriptors advertise 44.1 kHz; and the block budget (64 frames) is
   `64/44100 = 1.451 ms`, matching measured effect run times.
-- **1.2 - engine at 48 kHz.** The USB audio endpoint accepts **48000 only** (WASAPI and
-  WDM-KS both reject 44100 with `Invalid sample rate -9997`), both model formats carry a
-  48 kHz rate field (`NA2L` header offset 8; `DDPB` begins `DDPB`, version 3, then
-  `80 bb 00 00`), and the integer `0xac44` that 1.12's engine writes appears **nowhere** in
-  the 1.2 image, which holds 48000 as both an integer and a float instead.
-- Caveat, stated plainly: the 1.2 figure is inference from those indicators, not a
-  disassembly of its audio initialisation. It is the best-supported reading available, and
-  the failure mode if wrong is the 1.46-semitone shift above, not corruption.
+- **1.2 - engine at 48 kHz.** The image configures 48000 where 1.12 writes 44100: the
+  integer is stored at `0x30104128` during audio init, and the float form is loaded from
+  `0x400889d4` at `0x400148e6`. The I2S setup derives MCLK as 48000 × 256 (`0x4003ff3e`)
+  and BCLK as 48000 × 64 (`0x4003ffd0`). The codec's FLL block at
+  `0x40014cf0..0x40014e38` is new in 1.2: it reads the 24-25 MHz peripheral clock, computes
+  an explicit fractional divider, writes it, then reads the registers back and rejects a
+  mismatch. The USB descriptors advertise 48000 only, the playback endpoint changed from
+  adaptive to asynchronous, and a 3-byte feedback endpoint at `0x40088c70` closes the loop.
+  Host-side, WASAPI and WDM-KS both reject 44100 with `Invalid sample rate -9997`.
+- **Read from the image, not from a scope.** Those configured values imply a 12.288 MHz
+  MCLK and a 3.072 MHz BCLK, and the 64-frame block budget is `64/48000 = 1.333 ms`. No pin
+  measurement or audio loopback was taken. Both model formats carry a 48 kHz rate field
+  (`NA2L` header offset 8; `DDPB` begins `DDPB`, version 3, then `80 bb 00 00`), and the
+  integer `0xac44` that 1.12's engine writes does not appear in the 1.2 image.
 
 Turning a WAV into those bytes is a separate problem, and one where the vendor's
 algorithm is unknown; [`../ir/`](../ir/) has a converter that states its choices and

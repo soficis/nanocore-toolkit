@@ -34,13 +34,14 @@ Three things worth knowing:
 
 - The checksum at offset 20 is `zlib.crc32(payload) & 0xFFFFFFFF` over the 7,484
   payload bytes only — not over the header, and not a CRC-16. If you compute it
-  over the whole blob the pedal rejects the write.
+  over the whole blob the pedal rejects the write. The firmware's own helper at
+  `0x4007761c` is the standard reflected CRC-32 (polynomial `0xEDB88320`), so the
+  algorithm is confirmed, not inferred from the Python side.
 - Offsets 24 and 28 were `1` and `0` in every one of the 30 slots we wrote and in
   every slot we read back. Treat them as required constants, not as scratch space.
-- Weight count and payload size are carried in the header, but the AMP path we
-  exercised is fixed at 1,871 / 7,484. Whether the pedal accepts a different
-  architecture through this path is untested — do not assume the header makes it
-  general.
+- Weight count and payload size are carried in the header, but the loader is fixed
+  at 1,871 weights and a 23-layer A2 Lite geometry (see below). The header's counts
+  are a check the firmware performs, not a way to install a different architecture.
 
 ## Payload
 
@@ -110,8 +111,38 @@ opcode (`0x39`) and compared:
 - 30/30 matched the blob we sent, byte for byte
 - 30/30 carried the 16-character name we wrote
 
-So the layout above is not an inference from a disassembly — it is what the device
-stores and returns.
+So the layout above is not inferred from a disassembly - it is what the device
+stores and returns, and the firmware's own parser agrees.
+
+## What the firmware does with it
+
+The blob is not just stored. The 1.2 image parses it, allocates run-time state for it, and
+runs it on the AMP path. From the decoded image:
+
+- **Validator at `0x40077658`.** It checks the header field for field: magic, version 1,
+  header size 32, sample rate 48000, weight count 1,871, payload size 7,484, then the
+  CRC-32. `0x4007e7fa` recognises `NA2L` as its own asset kind and dispatches it separately
+  from the `DDPB` drive models; the runtime kind it installs is 4, a different number from
+  the kind in the slot record.
+- **Fixed geometry.** The network is 3 input channels, 64-sample blocks, 23 layers. The
+  dilations at `0x400917d8` are `1,3,7,17,41,101,239` twice, then `1,13`, then the same
+  seven again; the kernel sizes at `0x40091808` are fourteen 6s, two 15s and seven 6s. The
+  activation is LeakyReLU with `0.01`, and the output head is a 16-tap, 3-input convolution
+  with a scalar scale. This is the A2 Lite shape, not a general NAM runtime.
+- **15× more state than weights.** The weights are 7,484 bytes. The run-time state is
+  **115,916 bytes**, allocated as 115,947 bytes and 32-byte aligned (`0x4007779e`,
+  `0x400777a6`). It comes from heap 2 (`heap_model`), a 124,832-byte DTCM region at
+  `0x30061860..0x30080000` described at `0x400a1e08`.
+- **It pre-warms on load.** `0x40077880` runs 100 zero blocks of 64 samples - 6,400 samples,
+  or 133 ms at 48 kHz - before the model is marked ready.
+- **The hot loop is not in ITCM.** The DSP body sits at `0x30080000`, in the code/data
+  segment, while the state sits in DTCM. Cycle cost was not measured, so there is no claim
+  here about real-time headroom.
+
+What this does **not** establish: that a particular `.nam` file converts to these numbers,
+that the pedal sounds like the reference implementation, or that a host converter produces
+the same weights as the vendor's tool. The `.nam` → `NA2L` step happens on the host; the
+firmware only shows what it will accept once you get there.
 
 ## Reference code
 
